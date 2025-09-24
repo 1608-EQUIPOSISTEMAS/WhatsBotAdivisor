@@ -88,7 +88,7 @@ class WhatsAppClient {
             
             // Obtener todos los registros de member_black
             const [rows] = await connection.execute(
-                'SELECT id, nombre, ruta_post, beneficio, ruta_pdf, precio FROM member_black'
+                'SELECT id, nombre, ruta_post, beneficio, ruta_pdf, precio FROM members'
             );
             
             await connection.end();
