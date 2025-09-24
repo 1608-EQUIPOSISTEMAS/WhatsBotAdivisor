@@ -11,7 +11,7 @@ app.use(express.json());
 
 let whatsappClient = null;
 let qrCode = null;
-let whatsappStatus = 'disconnected'; // 'disconnected', 'generating_qr', 'waiting_scan', 'connected'
+let whatsappStatus = 'disconnected';
 
 // Ruta para iniciar WhatsApp
 app.post('/start-whatsapp', (req, res) => {
@@ -71,5 +71,5 @@ global.setDisconnected = () => {
 };
 
 app.listen(3000, () => {
-    console.log('Servidor Node.js corriendo en puerto 3000');
+    console.log('Servidor Iniciado');
 });
