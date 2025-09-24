@@ -1,0 +1,35 @@
+name: Deploy to Production VPS
+on:
+  push:
+    branches:
+      # 1. SE CAMBIÓ LA RAMA A "main"
+      - main
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      # Clona el repositorio
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      # Se conecta a tu VPS y ejecuta los comandos de despliegue
+      - name: Deploy to VPS via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            # Navega a la carpeta del proyecto en tu servidor
+            cd ~/WhatsBotAdivisor
+            # 2. SE CAMBIÓ LA RAMA DE "git pull" A "main"
+            # Descarga los últimos cambios desde la rama main
+            git pull origin main
+            # Instala nuevas dependencias si es necesario
+            npm install
+            # 3. SE AÑADIERON LOS COMANDOS "rm"
+            # Limpia la sesión y caché de WhatsApp antes de reiniciar
+            echo "Limpiando la sesión y caché de WhatsApp..."
+            rm -rf .wwebjs_auth
+            rm -rf .wwebjs_cache
+            # Reinicia el bot con PM2 para aplicar los cambios
+            pm2 restart whats-bot
