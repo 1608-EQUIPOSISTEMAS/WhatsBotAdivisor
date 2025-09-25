@@ -204,6 +204,7 @@ class WhatsAppClient {
             await this.client.sendMessage(
                 message.from,
                 '❌ Error al procesar tu solicitud. Por favor intenta más tarde.'
+                
             );
         }
     }
