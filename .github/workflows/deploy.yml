@@ -2,25 +2,47 @@ name: Deploy to Production VPS
 on:
   push:
     branches:
-      # 1. SE CAMBIÓ LA RAMA A "main"
       - main
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      # Clona el repositorio
+      # Clona el repo
       - name: Checkout repository
         uses: actions/checkout@v4
-      # Se conecta a tu VPS y ejecuta los comandos de despliegue
-      - name: Deploy to VPS via SSH
+
+      # Despliega múltiples servicios
+      - name: Deploy multiple services to VPS via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            rm -rf ~/WhatsBotAdivisor
-            git clone -b main https://github.com/1608-EQUIPOSISTEMAS/WhatsBotAdivisor.git ~/WhatsBotAdivisor
-            cd ~/WhatsBotAdivisor
-            npm install
-            pm2 restart whats-bot
+            # Definir servicios con sus puertos
+            declare -A projects=( 
+              ["bot1"]=3001 
+              ["bot2"]=3002 
+              ["bot3"]=3003 
+              ["bot4"]=3004 
+              ["bot5"]=3005 
+            )
+
+            for project in "${!projects[@]}"
+            do
+              echo ">>> Deployando $project en puerto ${projects[$project]}"
+
+              # Elimina versión anterior y vuelve a clonar
+              rm -rf ~/$project
+              git clone -b main https://github.com/1608-EQUIPOSISTEMAS/WhatsBotAdivisor.git ~/$project
+
+              cd ~/$project
+              npm install
+
+              # Arranca/reinicia con pm2
+              PORT=${projects[$project]} pm2 restart $project || PORT=${projects[$project]} pm2 start server.js --name $project
+            done
+
+            # Guardar configuración de pm2 para reinicio automático
+            pm2 save
