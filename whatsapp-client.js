@@ -64,24 +64,132 @@ class WhatsAppClient {
         console.log(`Procesando mensaje: "${messageBody}"`);
         
         try {
+            console.log('Iniciando búsqueda en la base de datos...');
             // Buscar en member_black primero
             const memberBlackResponse = await this.checkMemberBlack(messageBody);
             if (memberBlackResponse) {
                 await this.sendMemberBlackResponse(message, memberBlackResponse);
                 return;
             }
+            console.log('No se encontraron coincidencias en member_black');
+            // Buscar en foundation
+            const foundationResponse = await this.checkFoundation(messageBody);
+            if(foundationResponse) {
+                await this.sendFoundationResponse(message, foundationResponse);
+                return;
+            }
+            console.log('No se encontraron coincidencias en foundation');
 
             // Si no encontró nada en member_black, verificar si es "info"
             if (messageBody === 'info') {
                 const welcomeMessage = await this.getWelcomeMessage();
                 console.log(`Enviando respuesta: ${welcomeMessage}`);
-                await message.reply(welcomeMessage);
+                await this.client.sendMessage(message.from,welcomeMessage);
             }
         } catch (error) {
             console.error('Error al procesar mensaje:', error);
-            await message.reply('Error al procesar tu solicitud. Por favor intenta más tarde.');
+            await this.client.sendMessage(message.from,'Error al procesar tu solicitud. Por favor intenta más tarde.');
         }
     }
+
+    
+
+    async checkFoundation(messageBody) {
+        try {
+            console.log('Consultando foundation en la base de datos...');
+            const connection = await mysql.createConnection(config.database);
+            //id	welcome	presentation_route	brochure_route	modality_first_route	modality_second_route	sesion	inversion_route	key_words
+            const [rows] = await connection.execute(
+                'select id, welcome, presentation_route, brochure_route, modality_first_route, modality_second_route, sesion, inversion_route, key_words, final_Text from bot_foundation'
+            );
+            console.log(`Total foundations obtenidas: ${rows.length}`);
+            await connection.end();
+            for (const row of rows) {
+                console.log(`Revisando foundation: ${messageBody} con keywords: ${row.key_words}`);
+
+                //key_words es un string literal "["congreso","proyectos"]"
+                let keywords = [];
+                try {
+                    keywords = JSON.parse(row.key_words);
+                } catch (e) {
+                    console.error('Error parsing key_words:', e);
+                    continue;
+                }
+                const coincidencia = keywords.some(palabra => 
+                    palabra.length > 2 && messageBody.includes(palabra.toLowerCase())
+                );
+                if (coincidencia) {
+                    console.log(`Coincidencia encontrada en foundation: ${row.id}`);
+                    return row;
+                }
+                console.log(`No hay coincidencia en foundation: ${row.id}`);
+                
+            }
+            console.log('No se encontraron coincidencias en foundation');
+            return null;
+        } catch (error) {
+            console.error('Error al consultar foundation:', error);
+            return null;
+        }   
+    }
+
+    async sendFoundationResponse(message, foundationData) {
+        try {
+            console.log('Enviando respuesta de foundation...');
+            // 1. Envian welcome
+            if (foundationData.welcome) {
+                await this.client.sendMessage(message.from,foundationData.welcome);
+                await this.sleep(1000); // Esperar 1 segundo entre envíos
+            }
+            // 2. Envian presentation_route (imagen)
+            if (foundationData.presentation_route) {
+                await this.sendImage(message, foundationData.presentation_route);
+                await this.sleep(1000); // Esperar 1 segundo entre envíos
+            }
+            
+            // 3. Envian brochure_route (PDF)
+            if (foundationData.brochure_route) {
+                await this.sendPDF(message, foundationData.brochure_route);
+                await this.sleep(1000); // Esperar 1 segundo entre envíos
+            }   
+            
+            // 4. Envian modalidad_first_route (imagen)
+            if (foundationData.modality_first_route) {
+                await this.sendImage(message, foundationData.modality_first_route);
+                await this.sleep(1000); // Esperar 1 segundo entre envíos
+            }
+            
+            // 5. Envian modalidad_second_route (imagen)
+            if (foundationData.modality_second_route) {
+                await this.sendImage(message, foundationData.modality_second_route);
+                await this.sleep(1000); // Esperar 1 segundo entre envíos
+            }
+
+            // 6. Envian sesion (texto)
+            if (foundationData.sesion) {
+                await this.client.sendMessage(message.from,foundationData.sesion);
+                await this.sleep(1000); // Esperar 1 segundo entre envíos
+            }
+
+            // 7. Envian inversion_route (imagen)
+            if (foundationData.inversion_route) {
+                await this.sendImage(message, foundationData.inversion_route);
+                await this.sleep(1000); // Esperar 1 segundo entre envíos
+            }
+
+            // 8. Envian final_Text (texto)
+            if (foundationData.final_Text) {
+                await this.client.sendMessage(message.from,foundationData.final_Text);
+            }
+
+
+            console.log('Respuesta completa enviada');
+        } catch (error) {
+            console.error('Error enviando respuesta foundation:', error);
+            await this.client.sendMessage(message.from,'Error al enviar la información. Por favor intenta más tarde.');
+        }
+    }
+
 
     async checkMemberBlack(messageBody) {
         try {
@@ -129,7 +237,7 @@ class WhatsAppClient {
 
             // 2. Enviar texto de beneficio
             if (memberData.beneficio) {
-                await message.reply(memberData.beneficio);
+                await this.client.sendMessage(message.from,memberData.beneficio);
                 await this.sleep(1000);
             }
 
@@ -141,14 +249,14 @@ class WhatsAppClient {
 
             // 4. Enviar precio
             if (memberData.precio) {
-                await message.reply(`💰 Precio: ${memberData.precio}`);
+                await this.client.sendMessage(message.from,`💰 Precio: ${memberData.precio}`);
             }
 
             console.log('Respuesta completa enviada');
 
         } catch (error) {
             console.error('Error enviando respuesta member_black:', error);
-            await message.reply('Error al enviar la información. Por favor intenta más tarde.');
+            await this.client.sendMessage(message.from,'Error al enviar la información. Por favor intenta más tarde.');
         }
     }
 
@@ -166,7 +274,7 @@ class WhatsAppClient {
             const isAccessible = await this.checkUrlAccessibility(fullUrl);
             if (!isAccessible) {
                 console.error(`Imagen no accesible: ${fullUrl}`);
-                await message.reply('❌ Imagen no disponible en este momento.');
+                await this.client.sendMessage(message.from,'❌ Imagen no disponible en este momento.');
                 return;
             }
 
@@ -183,7 +291,7 @@ class WhatsAppClient {
 
         } catch (error) {
             console.error('Error enviando imagen:', error);
-            await message.reply('❌ Error al enviar la imagen.');
+            await this.client.sendMessage(message.from,'❌ Error al enviar la imagen.');
         }
     }
 
@@ -201,7 +309,7 @@ class WhatsAppClient {
             const isAccessible = await this.checkUrlAccessibility(fullUrl);
             if (!isAccessible) {
                 console.error(`PDF no accesible: ${fullUrl}`);
-                await message.reply('❌ PDF no disponible en este momento.');
+                await this.client.sendMessage(message.from,'❌ PDF no disponible en este momento.');
                 return;
             }
 
@@ -214,13 +322,12 @@ class WhatsAppClient {
 
             // Enviar PDF
             await this.client.sendMessage(message.from, media, {
-                caption: '📄 Documento adjunto'
             });
             console.log('PDF enviado exitosamente');
 
         } catch (error) {
             console.error('Error enviando PDF:', error);
-            await message.reply('❌ Error al enviar el documento.');
+            await this.client.sendMessage(message.from,'❌ Error al enviar el documento.');
         }
     }
 
