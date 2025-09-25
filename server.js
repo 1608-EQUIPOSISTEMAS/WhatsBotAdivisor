@@ -17,6 +17,10 @@ let whatsappStatus = 'disconnected';
 let lastConnectionTime = null;
 let cleanupInProgress = false;
 
+// ALMACENAR ROL Y PERMISOS ACTUALES
+let currentUserRole = null;
+let currentUserPermissions = [];
+
 // Función para limpiar carpetas de sesión
 function cleanupSessionFolders() {
     if (cleanupInProgress) {
@@ -38,7 +42,6 @@ function cleanupSessionFolders() {
             
             const cleanupPromise = new Promise((resolve) => {
                 try {
-                    // Eliminar recursivamente
                     fs.rmSync(folderPath, { recursive: true, force: true });
                     console.log(`✅ Carpeta ${folder} eliminada exitosamente`);
                 } catch (error) {
@@ -62,6 +65,8 @@ function cleanupSessionFolders() {
         qrCode = null;
         whatsappStatus = 'disconnected';
         lastConnectionTime = null;
+        currentUserRole = null;
+        currentUserPermissions = [];
     }).catch(error => {
         console.error('❌ Error durante la limpieza:', error);
         cleanupInProgress = false;
@@ -73,24 +78,38 @@ async function verifySessionHealth() {
     const authPath = path.join(__dirname, '.wwebjs_auth');
     const cachePath = path.join(__dirname, '.wwebjs_cache');
     
-    // Si existen las carpetas pero no hay cliente activo, probablemente están corruptas
     if ((fs.existsSync(authPath) || fs.existsSync(cachePath)) && whatsappStatus === 'disconnected') {
         console.log('⚠️ Detectadas carpetas de sesión huérfanas, limpiando...');
         await cleanupSessionFolders();
     }
 }
 
-// Ruta para iniciar WhatsApp
+// Ruta para iniciar WhatsApp CON ROL
 app.post('/start-whatsapp', async (req, res) => {
     try {
-        console.log(`🚀 Intentando iniciar WhatsApp. Estado actual: ${whatsappStatus}`);
+        const { role, permissions } = req.body;
+        
+        console.log(`\n🚀 INICIANDO WHATSAPP`);
+        console.log(`👤 Rol recibido: ${role}`);
+        console.log(`🔐 Permisos: ${JSON.stringify(permissions)}`);
+        console.log(`📊 Estado actual: ${whatsappStatus}`);
+        
+        // Validar que se envió el rol
+        if (!role || !permissions || permissions.length === 0) {
+            return res.json({ 
+                success: false, 
+                message: 'Debe proporcionar rol y permisos del usuario'
+            });
+        }
         
         // Verificar si ya está conectado
         if (whatsappClient && whatsappStatus === 'connected') {
             return res.json({ 
                 success: false, 
                 message: 'WhatsApp ya está conectado',
-                status: whatsappStatus 
+                status: whatsappStatus,
+                currentRole: currentUserRole,
+                currentPermissions: currentUserPermissions
             });
         }
         
@@ -99,27 +118,32 @@ app.post('/start-whatsapp', async (req, res) => {
             return res.json({ 
                 success: false, 
                 message: 'WhatsApp ya está iniciando...',
-                status: whatsappStatus 
+                status: whatsappStatus
             });
         }
         
         // Verificar salud de la sesión antes de iniciar
         await verifySessionHealth();
         
+        // GUARDAR ROL Y PERMISOS ACTUALES
+        currentUserRole = role;
+        currentUserPermissions = permissions;
+        
+        console.log(`✅ Rol y permisos guardados globalmente`);
+        
         // Cambiar estado antes de iniciar
         whatsappStatus = 'generating_qr';
         qrCode = null;
         
         try {
-            whatsappClient = new WhatsAppClient();
+            // Pasar rol y permisos al cliente WhatsApp
+            whatsappClient = new WhatsAppClient(role, permissions);
             
-            // Configurar timeouts y handlers de error
             const startTimeout = setTimeout(() => {
                 console.log('⏰ Timeout iniciando WhatsApp, limpiando...');
                 handleWhatsAppError('Timeout al iniciar WhatsApp');
-            }, 30000); // 30 segundos timeout
+            }, 30000);
             
-            // Limpiar timeout si todo va bien
             global.clearStartTimeout = () => clearTimeout(startTimeout);
             
             await whatsappClient.start();
@@ -127,7 +151,9 @@ app.post('/start-whatsapp', async (req, res) => {
             res.json({ 
                 success: true, 
                 message: 'WhatsApp iniciando...',
-                status: whatsappStatus
+                status: whatsappStatus,
+                role: currentUserRole,
+                permissions: currentUserPermissions
             });
             
         } catch (error) {
@@ -158,7 +184,9 @@ app.get('/get-qr', (req, res) => {
         qr: qrCode,
         status: whatsappStatus,
         timestamp: new Date().toISOString(),
-        lastConnection: lastConnectionTime
+        lastConnection: lastConnectionTime,
+        role: currentUserRole,
+        permissions: currentUserPermissions
     });
 });
 
@@ -180,6 +208,8 @@ app.post('/stop-whatsapp', async (req, res) => {
         qrCode = null;
         whatsappStatus = 'disconnected';
         lastConnectionTime = null;
+        currentUserRole = null;
+        currentUserPermissions = [];
         
         res.json({ 
             success: true, 
@@ -202,7 +232,6 @@ app.post('/cleanup-session', async (req, res) => {
     try {
         console.log('🧹 Limpieza manual solicitada...');
         
-        // Detener cliente si existe
         if (whatsappClient) {
             try {
                 await whatsappClient.stop();
@@ -211,7 +240,6 @@ app.post('/cleanup-session', async (req, res) => {
             }
         }
         
-        // Limpiar carpetas
         await cleanupSessionFolders();
         
         res.json({ 
@@ -236,17 +264,26 @@ app.get('/health', (req, res) => {
         status: 'ok',
         whatsappStatus: whatsappStatus,
         hasClient: !!whatsappClient,
+        currentRole: currentUserRole,
+        currentPermissions: currentUserPermissions,
         timestamp: new Date().toISOString(),
         uptime: process.uptime()
     });
 });
+
+// Función para obtener rol y permisos actuales
+global.getUserPermissions = () => {
+    return {
+        role: currentUserRole,
+        permissions: currentUserPermissions
+    };
+};
 
 // Función para manejar errores de WhatsApp
 async function handleWhatsAppError(errorMessage) {
     console.log(`❌ Manejando error de WhatsApp: ${errorMessage}`);
     
     try {
-        // Detener cliente si existe
         if (whatsappClient) {
             try {
                 await whatsappClient.stop();
@@ -255,9 +292,7 @@ async function handleWhatsAppError(errorMessage) {
             }
         }
         
-        // Limpiar carpetas de sesión
         await cleanupSessionFolders();
-        
         console.log('✅ Error manejado, estado limpiado');
         
     } catch (error) {
@@ -271,7 +306,6 @@ global.setQR = (qr) => {
     whatsappStatus = 'waiting_scan';
     console.log('📱 QR establecido, esperando escaneo...');
     
-    // Limpiar timeout de inicio si existe
     if (global.clearStartTimeout) {
         global.clearStartTimeout();
     }
@@ -282,8 +316,8 @@ global.setReady = () => {
     whatsappStatus = 'connected';
     lastConnectionTime = new Date().toISOString();
     console.log('✅ WhatsApp conectado exitosamente');
+    console.log(`👤 Usuario conectado - Rol: ${currentUserRole}, Permisos: ${currentUserPermissions.join(', ')}`);
     
-    // Limpiar timeout de inicio si existe
     if (global.clearStartTimeout) {
         global.clearStartTimeout();
     }
@@ -296,14 +330,12 @@ global.setDisconnected = async () => {
     whatsappStatus = 'disconnected';
     console.log('📱 WhatsApp desconectado');
     
-    // Si estaba conectado y se desconectó inesperadamente, limpiar sesión
     if (wasConnected) {
         console.log('⚠️ Desconexión inesperada detectada, limpiando sesión...');
         await cleanupSessionFolders();
     }
 };
 
-// Manejar errores no capturados
 global.handleWhatsAppError = handleWhatsAppError;
 
 // Verificar estado al iniciar el servidor
@@ -316,13 +348,17 @@ verifySessionHealth().then(() => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-    console.log(`🚀 Servidor iniciado en puerto ${PORT}`);
-    console.log('📋 Rutas disponibles:');
-    console.log('   POST /start-whatsapp - Iniciar WhatsApp');
-    console.log('   GET  /get-qr - Obtener QR y estado');
-    console.log('   POST /stop-whatsapp - Detener WhatsApp');
-    console.log('   POST /cleanup-session - Limpiar sesión manualmente');
-    console.log('   GET  /health - Estado del servidor');
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`🚀 SERVIDOR WHATSAPP BOT INICIADO`);
+    console.log(`${'='.repeat(60)}`);
+    console.log(`📡 Puerto: ${PORT}`);
+    console.log(`🌐 Endpoints disponibles:`);
+    console.log(`   POST /start-whatsapp    - Iniciar WhatsApp (requiere role y permissions)`);
+    console.log(`   GET  /get-qr           - Obtener QR y estado`);
+    console.log(`   POST /stop-whatsapp    - Detener WhatsApp`);
+    console.log(`   POST /cleanup-session  - Limpiar sesión`);
+    console.log(`   GET  /health           - Estado del servidor`);
+    console.log(`${'='.repeat(60)}\n`);
 });
 
 // Manejar cierre graceful del servidor
