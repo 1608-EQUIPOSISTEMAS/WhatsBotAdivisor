@@ -19,17 +19,8 @@ jobs:
           username: ${{ secrets.VPS_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            # Navega a la carpeta del proyecto en tu servidor
+            rm -rf ~/WhatsBotAdivisor
+            git clone -b main https://github.com/1608-EQUIPOSISTEMAS/WhatsBotAdivisor.git ~/WhatsBotAdivisor
             cd ~/WhatsBotAdivisor
-            # 2. SE CAMBIÓ LA RAMA DE "git pull" A "main"
-            # Descarga los últimos cambios desde la rama main
-            git pull origin main
-            # Instala nuevas dependencias si es necesario
             npm install
-            # 3. SE AÑADIERON LOS COMANDOS "rm"
-            # Limpia la sesión y caché de WhatsApp antes de reiniciar
-            echo "Limpiando la sesión y caché de WhatsApp..."
-            rm -rf .wwebjs_auth
-            rm -rf .wwebjs_cache
-            # Reinicia el bot con PM2 para aplicar los cambios
             pm2 restart whats-bot
