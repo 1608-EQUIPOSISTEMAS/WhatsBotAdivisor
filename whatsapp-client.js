@@ -153,8 +153,8 @@ class WhatsAppClient {
 
     async sendImage(message, imagePath) {
         try {
-            // Construir la ruta completa de la imagen
-            const fullPath = path.join(__dirname, '..', imagePath);
+            // Construir la URL completa de la imagen
+            const fullPath = `https://whatsbotadivisorfronted.onrender.com/${imagePath.replace(/^\/+/, '')}`;
             
             console.log(`Intentando enviar imagen: ${fullPath}`);
 
@@ -181,7 +181,7 @@ class WhatsAppClient {
     async sendPDF(message, pdfPath) {
         try {
             // Construir la ruta completa del PDF
-            const fullPath = path.join(__dirname, '..', pdfPath);
+            const fullPath = `https://whatsbotadivisorfronted.onrender.com/${pdfPath.replace(/^\/+/, '')}`;
             
             console.log(`Intentando enviar PDF: ${fullPath}`);
 
