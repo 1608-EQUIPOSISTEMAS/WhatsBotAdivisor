@@ -62,6 +62,72 @@ class WhatsAppClient {
 
         const messageBody = message.body.toLowerCase().trim();
         console.log(`Procesando mensaje: "${messageBody}"`);
+
+        //verificar si el contacto ya tiene un estado
+        const contactStatus = await this.getContactStatusAndDate(message.from);
+        if (contactStatus && contactStatus.type_status !== 'null') {
+            console.log(`El contacto ${message.from} ya tiene un estado: ${contactStatus.type_status} desde ${contactStatus.registration_date}`);
+            // Aquí puedes manejar diferentes estados si es necesario
+            //gestionar estado foundation_modality_selection
+            if (contactStatus.type_status === 'foundation_modality_selection') {
+                // verificar si ya paso 1 hora si es asi resetear estado a null
+                const oneHour = 60 * 60 * 1000; // 1 hora en milisegundos
+                const now = new Date();
+                const registrationDate = new Date(contactStatus.registration_date);
+                
+                if (now - registrationDate > oneHour) {
+                    console.log(`El estado del contacto ${message.from} ha expirado. Reseteando estado.`);
+                    await this.updateContactStatus(message.from, 'null');
+                    return;
+                }
+
+                if(!['1','2','3','4','pase vip','pase premiun','pase general','pase virtual','pase','vip','premiun','virtual','general'].includes(messageBody)) {
+                    return;
+                }else{
+                    //obtener data foundation
+                    const foundationData = await this.getDataFoundationById(1); 
+                    
+                    await this.client.sendMessage(message.from,foundationData.message_method_payment);
+                    await this.updateContactStatus(message.from, 'foundation_payment_selection');
+                    return;
+                }
+            }
+
+            if (contactStatus.type_status === 'foundation_payment_selection') {
+                //verifico si paso 1 hora
+                const oneHour = 60 * 60 * 1000; // 1 hora en milisegundos
+                const now = new Date();
+                const registrationDate = new Date(contactStatus.registration_date);
+                if (now - registrationDate > oneHour) {
+                    console.log(`El estado del contacto ${message.from} ha expirado. Reseteando estado.`);
+                    await this.updateContactStatus(message.from, 'null');
+                    return;
+                }
+
+                if(!['1','2','3','yape','depósito','deposito','transferencia','tarjeta','tarjeta de crédito','tarjeta de debito','tarjeta de débito'].includes(messageBody)) {
+                    return;
+                }else{
+                    //obtener data foundation
+                    const foundationData = await this.getDataFoundationById(1); 
+
+                    if(['1','yape'].includes(messageBody)){
+                        await this.client.sendMessage(message.from,foundationData.yape_text_one);
+                        await this.sendImage(message, foundationData.yape_route_one);
+                        await this.client.sendMessage(message.from,foundationData.yape_text_second);
+                        //reset status to null
+                        await this.updateContactStatus(message.from, 'null');   
+                        return;
+                    }
+                    if(['2','depósito','deposito','transferencia','3','tarjeta','tarjeta de crédito','tarjeta de debito','tarjeta de débito'].includes(messageBody)){
+                        await this.client.sendMessage(message.from,foundationData.card_text_one);
+                        await this.client.sendMessage(message.from,foundationData.card_text_second);
+                        //reset status to null
+                        await this.updateContactStatus(message.from, 'null');
+                        return;
+                    }
+                }
+            }
+        }
         
         try {
             console.log('Iniciando búsqueda en la base de datos...');
@@ -75,7 +141,7 @@ class WhatsAppClient {
             // Buscar en foundation
             const foundationResponse = await this.checkFoundation(messageBody);
             if(foundationResponse) {
-                await this.sendFoundationResponse(message, foundationResponse);
+                await this.sendFoundationPrincipleResponse(message, foundationResponse);
                 return;
             }
             console.log('No se encontraron coincidencias en foundation');
@@ -97,6 +163,8 @@ class WhatsAppClient {
     async checkFoundation(messageBody) {
         try {
             console.log('Consultando foundation en la base de datos...');
+
+
             const connection = await mysql.createConnection(config.database);
             //id	welcome	presentation_route	brochure_route	modality_first_route	modality_second_route	sesion	inversion_route	key_words
             const [rows] = await connection.execute(
@@ -133,7 +201,28 @@ class WhatsAppClient {
         }   
     }
 
-    async sendFoundationResponse(message, foundationData) {
+    getDataFoundationById(id) {
+        return new Promise(async (resolve, reject) => {
+            try {
+                const connection = await mysql.createConnection(config.database);
+                const [rows] = await connection.execute(
+                    'SELECT * FROM bot_foundation WHERE id = ?',
+                    [id]
+                );
+                await connection.end();
+                if (rows.length > 0) {
+                    resolve(rows[0]);
+                } else {
+                    resolve(null);
+                }
+            } catch (error) {
+                console.error('Error obteniendo foundation por ID:', error);
+                reject(error);
+            }
+        });
+    }
+
+    async sendFoundationPrincipleResponse(message, foundationData) {
         try {
             console.log('Enviando respuesta de foundation...');
             // 1. Envian welcome
@@ -182,11 +271,71 @@ class WhatsAppClient {
                 await this.client.sendMessage(message.from,foundationData.final_Text);
             }
 
+            await this.updateContactStatus(message.from, 'foundation_modality_selection');  
 
             console.log('Respuesta completa enviada');
         } catch (error) {
             console.error('Error enviando respuesta foundation:', error);
             await this.client.sendMessage(message.from,'Error al enviar la información. Por favor intenta más tarde.');
+        }
+    }
+
+    // Actualiza el estado del contacto en la base de datos
+    async updateContactStatus(contact, type_status) {
+        try {
+            console.log(`Actualizando estado de contacto: ${contact} -> ${type_status}`);
+
+            const connection = await mysql.createConnection(config.database);
+            console.log('Conexión a la base de datos establecida');
+            //verificar si ya existe un registro para ese contacto
+            const [rows] = await connection.execute(
+                'SELECT id FROM bot_contact_status WHERE contact = ? ORDER BY id DESC LIMIT 1',
+                [contact]
+            );
+            console.log(`Registros encontrados para ${contact}: ${rows.length}`);
+            if (rows.length > 0) {
+                //actualizar el registro
+                console.log(`Actualizando registro existente con id: ${rows[0].id}`);
+                await connection.execute(
+                    'UPDATE bot_contact_status SET type_status = ?, registration_date = NOW() WHERE id = ?',
+                    [type_status, rows[0].id]
+                );
+                await connection.end();
+                console.log(`Estado de contacto actualizado: ${contact} -> ${type_status}`);
+                return;
+            }
+            console.log('No se encontró registro existente, insertando nuevo registro');
+            //si no existe, insertar nuevo registro
+
+            await connection.execute(
+                'INSERT INTO bot_contact_status (type_status, contact) VALUES (?, ?)',
+                [type_status, contact]
+            );
+            console.log('Inserción completada');
+            await connection.end();
+            console.log(`Estado de contacto actualizado: ${contact} -> ${type_status}`);
+        } catch (error) {
+            console.error('Error actualizando estado de contacto:', error);
+        }   
+    }
+
+    //get status and datetime of contact
+    async getContactStatusAndDate(contact) {
+        try {
+            const connection = await mysql.createConnection(config.database);
+            const [rows] = await connection.execute(
+                'SELECT type_status, registration_date FROM bot_contact_status WHERE contact = ? ORDER BY id DESC LIMIT 1',
+                [contact]
+            );
+            await connection.end();
+            if (rows.length > 0) {
+                return rows[0];
+            } else {
+                return null;
+            }
+        } catch (error) {
+            console.error('Error obteniendo estado de contacto:', error);
+            return null;
         }
     }
 
