@@ -4,6 +4,7 @@ const mysql = require('mysql2/promise');
 const config = require('./config');
 const fs = require('fs');
 const path = require('path');
+const axios = require('axios'); // Añadir axios para peticiones HTTP
 
 class WhatsAppClient {
     constructor() {
@@ -151,23 +152,31 @@ class WhatsAppClient {
         }
     }
 
+    /**
+     * Método mejorado para enviar imágenes desde URL
+     */
     async sendImage(message, imagePath) {
         try {
             // Construir la URL completa de la imagen
-            const fullPath = `https://whatsbotadivisorfronted.onrender.com/${imagePath.replace(/^\/+/, '')}`;
+            const fullUrl = `https://whatsbotadivisorfronted.onrender.com/${imagePath.replace(/^\/+/, '')}`;
             
-            console.log(`Intentando enviar imagen: ${fullPath}`);
+            console.log(`Intentando enviar imagen: ${fullUrl}`);
 
-            // Verificar si el archivo existe
-            if (!fs.existsSync(fullPath)) {
-                console.error(`Imagen no encontrada: ${fullPath}`);
+            // Verificar si la URL es accesible
+            const isAccessible = await this.checkUrlAccessibility(fullUrl);
+            if (!isAccessible) {
+                console.error(`Imagen no accesible: ${fullUrl}`);
                 await message.reply('❌ Imagen no disponible en este momento.');
                 return;
             }
 
-            // Crear media desde archivo
-            const media = MessageMedia.fromFilePath(fullPath);
+            // Descargar y crear media desde URL
+            const media = await this.createMediaFromUrl(fullUrl, 'image');
             
+            if (!media) {
+                throw new Error('No se pudo crear el media desde la URL');
+            }
+
             // Enviar imagen
             await this.client.sendMessage(message.from, media);
             console.log('Imagen enviada exitosamente');
@@ -178,23 +187,31 @@ class WhatsAppClient {
         }
     }
 
+    /**
+     * Método mejorado para enviar PDFs desde URL
+     */
     async sendPDF(message, pdfPath) {
         try {
-            // Construir la ruta completa del PDF
-            const fullPath = `https://whatsbotadivisorfronted.onrender.com/${pdfPath.replace(/^\/+/, '')}`;
+            // Construir la URL completa del PDF
+            const fullUrl = `https://whatsbotadivisorfronted.onrender.com/${pdfPath.replace(/^\/+/, '')}`;
             
-            console.log(`Intentando enviar PDF: ${fullPath}`);
+            console.log(`Intentando enviar PDF: ${fullUrl}`);
 
-            // Verificar si el archivo existe
-            if (!fs.existsSync(fullPath)) {
-                console.error(`PDF no encontrado: ${fullPath}`);
+            // Verificar si la URL es accesible
+            const isAccessible = await this.checkUrlAccessibility(fullUrl);
+            if (!isAccessible) {
+                console.error(`PDF no accesible: ${fullUrl}`);
                 await message.reply('❌ PDF no disponible en este momento.');
                 return;
             }
 
-            // Crear media desde archivo
-            const media = MessageMedia.fromFilePath(fullPath);
+            // Descargar y crear media desde URL
+            const media = await this.createMediaFromUrl(fullUrl, 'document');
             
+            if (!media) {
+                throw new Error('No se pudo crear el media desde la URL');
+            }
+
             // Enviar PDF
             await this.client.sendMessage(message.from, media, {
                 caption: '📄 Documento adjunto'
@@ -204,6 +221,93 @@ class WhatsAppClient {
         } catch (error) {
             console.error('Error enviando PDF:', error);
             await message.reply('❌ Error al enviar el documento.');
+        }
+    }
+
+    /**
+     * Verifica si una URL es accesible
+     */
+    async checkUrlAccessibility(url) {
+        try {
+            const response = await axios.head(url, {
+                timeout: 10000, // 10 segundos timeout
+                validateStatus: (status) => status >= 200 && status < 400
+            });
+            return true;
+        } catch (error) {
+            console.error(`URL no accesible: ${url}`, error.message);
+            return false;
+        }
+    }
+
+    /**
+     * Crea un MessageMedia desde una URL
+     */
+    async createMediaFromUrl(url, type = 'image') {
+        try {
+            console.log(`Descargando ${type} desde: ${url}`);
+            
+            // Descargar el archivo
+            const response = await axios.get(url, {
+                responseType: 'arraybuffer',
+                timeout: 30000, // 30 segundos timeout
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+            });
+
+            // Obtener información del archivo
+            const contentType = response.headers['content-type'] || this.getMimeTypeFromUrl(url);
+            const filename = this.getFilenameFromUrl(url);
+            
+            console.log(`Archivo descargado: ${filename}, Tipo: ${contentType}, Tamaño: ${response.data.length} bytes`);
+
+            // Crear MessageMedia desde buffer
+            const media = new MessageMedia(
+                contentType,
+                Buffer.from(response.data).toString('base64'),
+                filename
+            );
+
+            return media;
+
+        } catch (error) {
+            console.error(`Error creando media desde URL: ${url}`, error.message);
+            return null;
+        }
+    }
+
+    /**
+     * Obtiene el tipo MIME basado en la extensión del archivo
+     */
+    getMimeTypeFromUrl(url) {
+        const extension = path.extname(url).toLowerCase();
+        const mimeTypes = {
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.png': 'image/png',
+            '.gif': 'image/gif',
+            '.webp': 'image/webp',
+            '.pdf': 'application/pdf',
+            '.doc': 'application/msword',
+            '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            '.mp4': 'video/mp4',
+            '.mp3': 'audio/mpeg'
+        };
+        return mimeTypes[extension] || 'application/octet-stream';
+    }
+
+    /**
+     * Extrae el nombre del archivo desde la URL
+     */
+    getFilenameFromUrl(url) {
+        try {
+            const urlObj = new URL(url);
+            const pathname = urlObj.pathname;
+            const filename = path.basename(pathname);
+            return filename || 'archivo';
+        } catch (error) {
+            return 'archivo';
         }
     }
 
@@ -226,7 +330,9 @@ class WhatsAppClient {
         }
     }
 
-    // Función auxiliar para pausas
+    /**
+     * Función auxiliar para pausas con mejor gestión
+     */
     sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
