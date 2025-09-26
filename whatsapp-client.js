@@ -175,7 +175,7 @@ class WhatsAppClient {
                             return;
                         }
 
-                        if(!['1','2','3','4','pase vip','pase premiun','pase general','pase virtual','pase','vip','premiun','virtual','general'].includes(messageBody)) {
+                        if(!['1','2','3','4','pase vip','pase premiun','pase general','pase virtual','pase','vip','premiun','virtual','general'].some(palabra => messageBody.includes(palabra))) {
                             return;
                         } else {
                             const foundationData = await this.getDataFoundationById(1); 
@@ -196,26 +196,52 @@ class WhatsAppClient {
                             return;
                         }
 
-                        if(!['1','2','3','yape','depósito','deposito','transferencia','tarjeta','tarjeta de crédito','tarjeta de debito','tarjeta de débito'].includes(messageBody)) {
+                        if(!['1','2','yape','depósito','deposito','transferencia','tarjeta','tarjeta de crédito','tarjeta de debito','tarjeta de débito'].some(palabra => messageBody.includes(palabra))) {
                             return;
                         } else {
                             const foundationData = await this.getDataFoundationById(1); 
 
-                            if(['1','yape'].includes(messageBody)){
-                                await this.client.sendMessage(message.from, foundationData.yape_text_one);
+                            if(['1','yape'].some(palabra => messageBody.includes(palabra))){
+                                await this.client.sendMessage(message.from,foundationData.yape_text_one);
                                 await this.sendImage(message, foundationData.yape_route_one);
                                 await this.client.sendMessage(message.from, foundationData.yape_text_second);
                                 await this.updateContactStatus(message.from, 'null');   
                                 return;
                             }
-                            if(['2','depósito','deposito','transferencia','3','tarjeta','tarjeta de crédito','tarjeta de debito','tarjeta de débito'].includes(messageBody)){
-                                await this.client.sendMessage(message.from, foundationData.card_text_one);
-                                await this.client.sendMessage(message.from, foundationData.card_text_second);
+                            if(['2','depósito','deposito','transferencia','tarjeta','tarjeta de crédito','tarjeta de debito','tarjeta de débito'].some(palabra => messageBody.includes(palabra))){
+                                await this.client.sendMessage(message.from,foundationData.card_text_one);
+                                await this.client.sendMessage(message.from,foundationData.card_text_second);
+                                //reset status to null
                                 await this.updateContactStatus(message.from, 'null');
                                 return;
                             }
                         }
                     }
+                }
+                
+                //si existe contactStatus y type_status es null y esta dentro de la hora no hacer nada
+                if(contactStatus && contactStatus.type_status === 'null') {
+                    const oneHour = 60 * 60 * 1000; // 1 hora en milisegundos
+                    const now = new Date();
+                    const registrationDate = new Date(contactStatus.registration_date);
+                    if (now - registrationDate < oneHour) {
+                        console.log(`El contacto ${message.from} tiene estado 'null' pero dentro del periodo de 1 hora. No se procesa el mensaje.`);
+                        return;
+                    }
+                    //si ya paso la hora resetear estado a null
+                    await this.updateContactStatus(message.from, 'null');
+                }   
+                
+                //si ah pasado 30 min desde el ultimo estado y es null entonces eliminar el contacto de la base de datos
+                if(contactStatus && contactStatus.type_status === 'null') {
+                    const thirtyMinutes = 30 * 60 * 1000; // 30 minutos en milisegundos
+                    const now = new Date();
+                    const registrationDate = new Date(contactStatus.registration_date);
+                    if (now - registrationDate > thirtyMinutes) {
+                        await this.deleteContactFromDatabase(message.from);
+                        console.log(`El contacto ${message.from} ha sido eliminado de la base de datos por inactividad.`);
+                    }
+                    
                 }
 
                 console.log('Usuario tiene permiso para Foundation, buscando...');
@@ -243,6 +269,20 @@ class WhatsAppClient {
                 '❌ Error al procesar tu solicitud. Por favor intenta más tarde.'
             );
         }
+    }
+
+    async deleteContactFromDatabase(contact) {
+        try {
+            const connection = await mysql.createConnection(config.database)
+            await connection.execute(
+                'DELETE FROM bot_contact_status WHERE contact = ?',
+                [contact]
+            );
+            await connection.end();
+            console.log(`Contacto ${contact} eliminado de la base de datos`);
+        } catch (error) {
+            console.error('Error eliminando contacto de la base de datos:', error);
+        }   
     }
 
     async checkFoundation(messageBody) {
