@@ -248,7 +248,7 @@ class WhatsAppClient {
                 const foundationResponse = await this.checkFoundation(messageBody);
                 if (foundationResponse) {
                     console.log(`Encontrado en Foundation: ${foundationResponse.id}`);
-                    await this.sendFoundationPrincipleResponse(message, foundationResponse);
+                    await this.sendFoundationPrincipleResponse(message, foundationResponse,messageBody);
                     return;
                 }
                 console.log('No se encontró en Foundation');
@@ -346,7 +346,7 @@ class WhatsAppClient {
         });
     }
 
-    async sendFoundationPrincipleResponse(message, foundationData) {
+    async sendFoundationPrincipleResponse(message, foundationData, messageBody=null) {
         try {
             console.log('Enviando respuesta de Foundation...');
             
@@ -377,7 +377,7 @@ class WhatsAppClient {
                 }
             }
 
-            await this.updateContactStatus(message.from, 'foundation_modality_selection');  
+            await this.updateContactStatus(message.from, 'foundation_modality_selection', messageBody);  
             console.log('Respuesta completa enviada');
         } catch (error) {
             console.error('Error enviando respuesta foundation:', error);
@@ -829,7 +829,7 @@ class WhatsAppClient {
         }
     }
 
-    async updateContactStatus(contact, type_status) {
+    async updateContactStatus(contact, type_status, message = null) {
         try {
             console.log(`\n🔄 Actualizando estado de contacto`);
             console.log(`Contact: ${contact}`);
@@ -854,6 +854,21 @@ class WhatsAppClient {
                     'INSERT INTO bot_contact_status (type_status, contact, registration_date) VALUES (?, ?, NOW())',
                     [type_status, contact]
                 );
+
+                /*
+                CREATE TABLE `bot_history` (
+                `id` int NOT NULL AUTO_INCREMENT,
+                `concat` varchar(500) not NULL,
+                `invoke_text` varchar(2000) NULL,
+                `registration_date` datetime DEFAULT NOW(),
+                PRIMARY KEY (`id`)
+                ) ENGINE=InnoDB AUTO_INCREMENT=1
+                */
+               await connection.execute(
+                    'INSERT INTO bot_history (concat, invoke_text) VALUES (?, ? )',
+                    [contact, message]
+                );
+
                 console.log(`✅ Estado guardado en nuevo registro`);
             }
             
